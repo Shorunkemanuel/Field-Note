@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import App from "../App";
+import { extractionsApi } from "../api/client";
 
 let createObjectURLDescriptor: PropertyDescriptor | undefined;
 let revokeObjectURLDescriptor: PropertyDescriptor | undefined;
@@ -60,6 +61,7 @@ describe("Field-Note interactions", () => {
       }
       return apiResponse([]);
     }));
+    vi.restoreAllMocks();
     createObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
     revokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
     Object.defineProperty(URL, "createObjectURL", {
@@ -126,7 +128,7 @@ describe("Field-Note interactions", () => {
     await user.click(screen.getByRole("button", { name: "Save field note" }));
 
     expect(await screen.findByRole("heading", { name: "West entrance puddle" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Captured evidence: site-photo.png" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Captured evidence: site-photo.png" })).toBeInTheDocument();
     expect(screen.getByText("Water is pooling by the door.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: /All observations/ }));
@@ -167,7 +169,7 @@ describe("Field-Note interactions", () => {
     await user.click(await screen.findByRole("button", { name: "Stop voice recording" }));
 
     expect(screen.getByText("Voice recording 1")).toBeInTheDocument();
-    expect(document.querySelector("audio")?.controls).toBe(true);
+    await waitFor(() => expect(document.querySelector("audio")?.controls).toBe(true));
     await user.click(screen.getByRole("button", { name: "Save field note" }));
 
     expect(await screen.findByRole("heading", { name: "Pump noise" })).toBeInTheDocument();
@@ -207,5 +209,93 @@ describe("Field-Note interactions", () => {
     expect(screen.queryByRole("img", { name: "Preview: discarded.png" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save field note" }));
     await waitFor(() => expect(screen.getByText("No evidence attached.")).toBeInTheDocument());
+  });
+
+  it("analyzes saved capture evidence and replaces the stored draft on retry", async () => {
+    const user = userEvent.setup();
+    let extractionCount = 0;
+    const extractionRequest = vi.spyOn(extractionsApi, "create").mockImplementation(async (capture) => {
+      extractionCount += 1;
+      const evidenceId = capture.evidence[0].id;
+      const findingTitle = extractionCount === 1 ? "First AI draft" : "Updated AI draft";
+      return {
+        capture_id: capture.id,
+        status: "AI_DRAFT",
+        findings: [{
+          status: "AI_DRAFT",
+          title: findingTitle,
+          description: "A visible surface condition may need attention.",
+          category: "Surface condition",
+          supporting_evidence: [evidenceId],
+          reasoning: "The uploaded image shows the described condition.",
+          uncertainty: "The extent is not clear from this image.",
+          confidence: 0.6,
+          suggested_actions: [{
+            title: "Inspect the area",
+            description: "A person may inspect the area more closely.",
+          }],
+          safety_concerns: ["A person could trip on the uneven surface."],
+        }],
+        limitations: [],
+        provider: "test-provider",
+        model: "open-weight-vision-test",
+      };
+    });
+    renderApp("/capture");
+    await user.type(screen.getByLabelText("Short title"), "Uneven path");
+    await user.upload(
+      screen.getByLabelText(/Take or choose photos/),
+      new File(["photo"], "path.png", { type: "image/png" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Save field note" }));
+    expect(await screen.findByRole("heading", { name: "Uneven path" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Analyze with AI" }));
+    expect(await screen.findByRole("heading", { name: "First AI draft" })).toBeInTheDocument();
+    expect(screen.getByText("AI draft · not verified")).toBeInTheDocument();
+    expect(screen.getAllByText("path.png")).toHaveLength(2);
+    expect(screen.getByText(/Suggested next steps — not actions taken/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Analyze again" }));
+    expect(await screen.findByRole("heading", { name: "Updated AI draft" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "First AI draft" })).not.toBeInTheDocument();
+    expect(extractionCount).toBe(2);
+    expect(extractionRequest).toHaveBeenCalledTimes(2);
+
+    await user.click(screen.getByRole("link", { name: /All observations/ }));
+    await user.click(await screen.findByRole("link", { name: /Uneven path/ }));
+    expect(await screen.findByRole("heading", { name: "Updated AI draft" })).toBeInTheDocument();
+  });
+
+  it("shows extraction failures without removing an existing draft", async () => {
+    const user = userEvent.setup();
+    let extractionCount = 0;
+    vi.spyOn(extractionsApi, "create").mockImplementation(async (capture) => {
+      extractionCount += 1;
+      if (extractionCount === 2) {
+        throw new Error("AI extraction is not configured on this server");
+      }
+      return {
+        capture_id: capture.id,
+        status: "AI_DRAFT",
+        findings: [],
+        limitations: ["Audio was not transcribed."],
+        provider: "test-provider",
+        model: "open-weight-vision-test",
+      };
+    });
+    renderApp("/capture");
+    await user.type(screen.getByLabelText("Short title"), "Pump noise");
+    await user.type(screen.getByLabelText(/Field note/), "A rattling sound is coming from the pump.");
+    await user.click(screen.getByRole("button", { name: "Save field note" }));
+    expect(await screen.findByRole("heading", { name: "Pump noise" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Analyze with AI" }));
+    expect(await screen.findByText("Audio was not transcribed.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Analyze again" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "AI extraction is not configured on this server",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("The previous draft was kept.");
   });
 });

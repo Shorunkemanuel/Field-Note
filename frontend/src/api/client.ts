@@ -1,10 +1,15 @@
-import type { Observation, ObservationCreate } from "../types";
+import type {
+  AIExtraction,
+  LocalCapture,
+  Observation,
+  ObservationCreate,
+} from "../types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...init?.headers,
     },
   });
@@ -37,4 +42,36 @@ export const observationsApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+};
+
+export const extractionsApi = {
+  create: (capture: LocalCapture) => {
+    const form = new FormData();
+    form.append(
+      "capture",
+      JSON.stringify({
+        id: capture.id,
+        title: capture.title,
+        text_note: capture.text_note,
+        created_at: capture.created_at,
+        location: capture.location,
+        evidence: capture.evidence.map(
+          ({ id, type, name, mime_type, created_at }) => ({
+            id,
+            type,
+            name,
+            mime_type,
+            created_at,
+          }),
+        ),
+      }),
+    );
+    for (const item of capture.evidence) {
+      form.append(`evidence:${item.id}`, item.blob, item.name);
+    }
+    return request<AIExtraction>("/extractions", {
+      method: "POST",
+      body: form,
+    });
+  },
 };

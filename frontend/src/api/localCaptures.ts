@@ -1,4 +1,4 @@
-import type { LocalCapture } from "../types";
+import type { AIExtraction, LocalCapture } from "../types";
 
 const DATABASE_NAME = "field-note-local";
 const DATABASE_VERSION = 1;
@@ -53,6 +53,19 @@ export async function getLocalCapture(id: string): Promise<LocalCapture | null> 
   } finally {
     database.close();
   }
+}
+
+export async function saveLocalExtraction(
+  id: string,
+  extraction: AIExtraction,
+): Promise<LocalCapture> {
+  const capture = await getLocalCapture(id);
+  if (!capture) {
+    throw new Error("The saved field note could not be found.");
+  }
+  const updated = { ...capture, ai_extraction: extraction };
+  await saveLocalCapture(updated);
+  return updated;
 }
 
 export async function listLocalCaptures(): Promise<LocalCapture[]> {

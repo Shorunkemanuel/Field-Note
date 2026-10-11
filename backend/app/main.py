@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import database
+from app.api.extractions import router as extractions_router
 from app.api.observations import router as observations_router
 
 
@@ -27,6 +28,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(observations_router)
+    application.include_router(extractions_router)
     return application
 
 

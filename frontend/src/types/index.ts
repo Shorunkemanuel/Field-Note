@@ -61,4 +61,32 @@ export interface LocalCapture {
   created_at: string;
   location: CaptureLocation | null;
   evidence: LocalCaptureEvidence[];
+  ai_extraction?: AIExtraction;
+}
+
+export interface SuggestedAction {
+  title: string;
+  description: string;
+}
+
+export interface AIDraftFinding {
+  status: "AI_DRAFT";
+  title: string;
+  description: string;
+  category: string;
+  supporting_evidence: string[];
+  reasoning: string;
+  uncertainty: string;
+  confidence: number | null;
+  suggested_actions: SuggestedAction[];
+  safety_concerns: string[];
+}
+
+export interface AIExtraction {
+  capture_id: string;
+  status: "AI_DRAFT";
+  findings: AIDraftFinding[];
+  limitations: string[];
+  provider: string;
+  model: string;
 }
