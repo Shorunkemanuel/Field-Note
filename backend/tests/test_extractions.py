@@ -377,3 +377,41 @@ async def test_provider_timeout_is_reported(monkeypatch):
 
     with pytest.raises(ProviderTimeout):
         await provider.analyze("context", [])
+
+
+@pytest.mark.anyio
+async def test_provider_http_status_is_logged_without_response_body(
+    monkeypatch, caplog
+):
+    import httpx
+
+    response = httpx.Response(
+        429,
+        text="private provider response",
+        request=httpx.Request("POST", "https://model.example"),
+    )
+
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            return response
+
+    monkeypatch.setattr("app.services.openai_compatible.httpx.AsyncClient", FakeClient)
+    provider = OpenAICompatibleProvider(
+        ProviderSettings("secret", "https://model.example/v1", "model", None, 1, "test")
+    )
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(ProviderError, match="Provider returned HTTP 429"):
+            await provider._post("/chat/completions")
+
+    assert "429" in caplog.text
+    assert "private provider response" not in caplog.text

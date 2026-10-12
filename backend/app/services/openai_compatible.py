@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -7,6 +8,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.services.extraction_types import EvidencePayload
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderError(Exception):
@@ -174,6 +177,9 @@ class OpenAICompatibleProvider:
         except httpx.TimeoutException as error:
             raise ProviderTimeout from error
         except httpx.HTTPStatusError as error:
+            logger.warning(
+                "AI provider returned HTTP %s", error.response.status_code
+            )
             raise ProviderError(
                 f"Provider returned HTTP {error.response.status_code}"
             ) from error
